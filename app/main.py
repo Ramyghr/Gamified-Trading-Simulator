@@ -32,7 +32,8 @@ from app.routers import (
     websocket,
     orders,
     watchlist,
-    websocket
+    websocket,
+    lesson
 )
 
 
@@ -109,6 +110,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(registration.router)
 app.include_router(user.router)
+app.include_router(lesson.router)
 app.include_router(portfolio.router)
 app.include_router(api_key.router)
 app.include_router(admin.router)

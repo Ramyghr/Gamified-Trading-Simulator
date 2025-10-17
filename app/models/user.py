@@ -3,7 +3,8 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.config.database import Base
 import enum
-
+from app.models.watchlist import Watchlist
+from app.models.portfolio import Portfolio
 class UserRole(enum.Enum):
     ADMIN = "admin"
     USER = "user"
@@ -43,6 +44,7 @@ class User(Base):
     liked_news_articles = relationship("NewsArticle", secondary="article_likes", back_populates="liked_by")
     comments = relationship("NewsArticleComment", back_populates="user")
     watchlists = relationship("Watchlist", back_populates="user", cascade="all, delete-orphan")
+
     def has_liked_article(self, article):
         return article in self.liked_news_articles
     

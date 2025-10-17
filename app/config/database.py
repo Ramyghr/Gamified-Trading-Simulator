@@ -12,12 +12,6 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 from sqlalchemy.ext.declarative import declarative_base
 Base = declarative_base()
 
-# Import all models **before creating tables**
-from app.models.user import User
-from app.models.portfolio import *
-from app.models.token import EmailVerificationToken, ResetPasswordToken, BlacklistedToken
-from app.models.stock import NewsArticle, NewsArticleComment
-from app.models.stock_transaction import StockTransaction
 
 # Create tables in the database
 Base.metadata.create_all(bind=engine)
