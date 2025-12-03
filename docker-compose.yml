@@ -1,0 +1,98 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    container_name: trading-fastapi
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.docker
+    volumes:
+      - .:/app
+    command: >
+      sh -c "
+        echo '✅ Database is ready, creating tables...' &&
+        python -c 'from app.config.database import Base, engine; from app.models import User, Portfolio, Order; Base.metadata.create_all(bind=engine); print(\"✅ Tables created!\")' &&
+        echo '🚀 Starting FastAPI...' &&
+        uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+      "
+    networks:
+      - trading-network
+
+  bot-executor:
+    build: .
+    command: python -m app.scripts.run_bot_worker
+    container_name: trading-bot-executor
+    restart: unless-stopped  
+    depends_on:
+      - db
+      - redis
+      - api
+    env_file:
+      - .env.docker
+    volumes:
+      - ./app:/app/app:ro  
+      - bot-logs:/app/logs 
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    image: postgres:15
+    container_name: trading-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ramy
+      POSTGRES_PASSWORD: Azert-11
+      POSTGRES_DB: trading_simulator
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ramy -d trading_simulator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - trading-network
+
+  redis:
+    image: redis:7
+    container_name: trading-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trading-network
+
+volumes:
+  bot-logs:
+  pgdata:
+
+networks:
+  trading-network:
+    driver: bridge
