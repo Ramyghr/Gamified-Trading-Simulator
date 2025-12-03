@@ -1,0 +1,4 @@
+,Days,Start_Date,End_Date,S&P_500_Return,VIX_Average,Bank_Avg_Return
+Build_up (0-15 min),331,2007-04-11 00:00:00,2008-07-31 00:00:00,,,
+Peak_Crisis (15-40 min),167,2008-08-01 00:00:00,2009-03-31 00:00:00,,,
+Recovery (40-60 min),191,2009-04-01 00:00:00,2009-12-31 00:00:00,,,

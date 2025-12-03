@@ -1,0 +1,37 @@
+# Project Summary
+
+## Non-Technical Summary
+
+This project is a feature-rich and gamified stock trading simulator designed to provide users with a realistic and educational trading experience. It allows users to trade stocks in a simulated real-time environment without risking real money. The platform is suitable for both beginners who want to learn the basics of trading and experienced traders who want to test their strategies.
+
+### Key Features:
+
+*   **Real-Time Stock Trading:** Users can buy and sell stocks at real-time market prices in a simulated environment. The platform supports various order types, including market, limit, and stop orders.
+*   **Leveraged Trading:** For more advanced users, the platform offers leveraged trading with margin accounts. This allows users to trade with more capital than they have in their account, amplifying both potential profits and losses. The system includes a liquidation engine to manage risk.
+*   **Algorithmic Trading:** Users can build and deploy their own automated trading bots. The platform provides a variety of pre-built strategies (e.g., moving average crossover, RSI) and allows for backtesting bots against historical data to evaluate their performance.
+*   **Gamified Learning:** The platform incorporates gamification elements to make learning about financial markets more engaging. Users can complete lessons, earn experience points (XP), and level up.
+*   **Crisis Simulations:** A unique feature of this platform is the ability to participate in simulations of historical market crises, such as the 1987 "Black Monday" or the 2008 financial crisis. This allows users to experience how their trading strategies would have performed in extreme market conditions.
+*   **News & Sentiment Analysis:** A built-in news feed provides users with the latest financial news. The system also performs sentiment analysis on news articles to give users an idea of the market mood.
+*   **Advanced Portfolio Management:** Users get a detailed overview of their portfolio performance, including daily and total returns, Sharpe ratio, and max drawdown. The platform tracks all transactions and provides in-depth analytics.
+
+## Technical Summary
+
+This project is a modern, high-performance web application with a Python backend. It is designed to be scalable and maintainable, with a clear separation of concerns.
+
+### Technical Stack:
+
+*   **Backend Framework:** FastAPI, a modern, fast (high-performance) web framework for building APIs with Python.
+*   **Database:** PostgreSQL is used as the relational database.
+*   **ORM:** SQLAlchemy is used as the Object-Relational Mapper for interacting with the database. Alembic is used for database migrations.
+*   **Real-time Communication:** WebSockets are used to stream real-time market data and notifications to clients.
+*   **Asynchronous Operations:** The application makes extensive use of Python's `asyncio` library for handling concurrent operations and running background tasks, such as the order processing engine, the market data refresher, and the liquidation engine.
+*   **Authentication:** User authentication is handled using JSON Web Tokens (JWT).
+*   **Data Analysis:** The `pandas` and `numpy` libraries are used for financial data analysis and manipulation, particularly in the backtesting and performance analytics features.
+*   **Key Dependencies:**
+    *   `yfinance`: To fetch historical and real-time stock market data.
+    *   `apscheduler`: For scheduling periodic background tasks, such as refreshing the news feed.
+    *   `redis`: For caching frequently accessed data to improve performance.
+*   **Architecture:** The application follows a modular and service-oriented architecture.
+    *   **Routers:** FastAPI routers are used to define the API endpoints for different features (e.g., users, bots, portfolios).
+    *   **Services:** The business logic is encapsulated in service classes, which are responsible for tasks like processing orders, managing portfolios, and running trading bots.
+    *   **Models:** SQLAlchemy models are used to define the database schema and represent the application's data structures.

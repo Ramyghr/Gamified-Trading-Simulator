@@ -1,0 +1,6 @@
+eval "$(ssh-agent -s)"
+*.pub
+*.pub
+*.pub
+eval "$(ssh-agent -s)"
+.env
