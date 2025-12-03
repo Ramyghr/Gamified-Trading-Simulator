@@ -44,11 +44,11 @@ async def get_current_user(
             raise credentials_exception
 
         # Optionally check email verification
-        if not user.email_verified:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Please verify your email first",
-            )
+        #  if not user.email_verified:
+            #  raise HTTPException(
+            #      status_code=status.HTTP_403_FORBIDDEN,
+             #     detail="Please verify your email first",
+            #  )
 
         logger.info(f"✅ Authenticated user: {user.email} (ID: {user.id})")
         return user

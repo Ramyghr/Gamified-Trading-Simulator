@@ -9,6 +9,7 @@ from app.config.database import get_db
 from app.middleware.jwt_middleware import get_current_user
 from app.constants.constants import VERIFY_EMAIL_PATH
 
+
 from app.models.user import User
 import logging
 router = APIRouter(tags=["authentication"])
@@ -20,14 +21,25 @@ async def register_new_user(user_data: UserCreate, db: Session = Depends(get_db)
     user_service = UserService(db)
     
     # Check if user already exists
-    if user_service.get_user_by_email(user_data.email):
+    existing_user = user_service.get_user_by_email(user_data.email)
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
-    
-    user = user_service.register_new_user(user_data)
-    return {"message": "User registered successfully. Please check your email for verification."}
+
+    try:
+        user = user_service.register_new_user(user_data)  # <-- pass model, not dict
+        return {
+            "message": "User registered successfully. Please check your email for verification."
+        }
+    except Exception as e:
+        logger.error(f"Error during user registration: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed"
+        )
+
 
 @router.get(VERIFY_EMAIL_PATH)
 async def verify_user_email(token: str, db: Session = Depends(get_db)):
@@ -122,3 +134,4 @@ async def logout_all_devices(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Logout from all devices failed"
         )
+    

@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging 
 import asyncio
-
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 # Database & Settings
 from app.config.database import Base, engine, SessionLocal
 from app.config import settings
@@ -89,13 +90,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Create uploads directory if it doesn't exist
+Path("uploads/avatars").mkdir(parents=True, exist_ok=True)
 
+# Serve static files (uploaded avatars)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # -------------------------------
 # Middleware
 # -------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:4200",  # Angular default
+        "http://127.0.0.1:4200",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -103,6 +110,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 # -------------------------------

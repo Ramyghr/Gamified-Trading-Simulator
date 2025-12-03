@@ -17,20 +17,30 @@ class UserBase(BaseModel):
     location: Optional[str] = None
     website: Optional[str] = None
 
+
 class RiskLevel(str, Enum):
-    CONSERVATIVE = "CONSERVATIVE"  # Changed to uppercase
-    MODERATE = "MODERATE"          # Changed to uppercase
-    AGGRESSIVE = "AGGRESSIVE"      # Changed to uppercase
+    CONSERVATIVE = "CONSERVATIVE"
+    MODERATE = "MODERATE"
+    AGGRESSIVE = "AGGRESSIVE"
 
 class OrderType(str, Enum):
-    MARKET = "MARKET"              # Changed to uppercase
-    LIMIT = "LIMIT"                # Changed to uppercase
-    STOP = "STOP"                  # Changed to uppercase
+    MARKET = "MARKET"
+    LIMIT = "LIMIT"
+    STOP = "STOP"
 
-class UserCreate(UserBase):
+class UserCreate(BaseModel):
+    first_name: str
+    last_name: str
+    email: EmailStr
     password: str
-    
-    # Notification Settings (with defaults)
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    bio: Optional[str] = None
+    avatar_url: Optional[str] = None
+    location: Optional[str] = None
+    website: Optional[str] = None
+
+    # Notification Settings
     email_notifications: bool = True
     push_notifications: bool = True
     trade_alerts: bool = True
@@ -38,8 +48,8 @@ class UserCreate(UserBase):
     news_alerts: bool = True
     social_updates: bool = True
     weekly_report: bool = True
-    
-    # Trading Preferences (with defaults)
+
+    # Trading Preferences
     default_order_type: OrderType = OrderType.MARKET
     confirm_orders: bool = True
     auto_stop_loss: bool = False
@@ -47,37 +57,27 @@ class UserCreate(UserBase):
     auto_take_profit: bool = False
     take_profit_percent: float = 10.0
     risk_level: RiskLevel = RiskLevel.MODERATE
-    
+
     @validator('password')
     def password_strength(cls, v):
         if len(v) < PASSWORD_MIN_LENGTH:
             raise ValueError(f'Password must be at least {PASSWORD_MIN_LENGTH} characters long')
         return v
-    
-    # REMOVE these validators - we don't need conversion anymore
-    # @validator('default_order_type', pre=True)
-    # def validate_order_type(cls, v):
-    #     if isinstance(v, str):
-    #         v = v.lower()
-    #     return v
-    
-    # @validator('risk_level', pre=True)
-    # def validate_risk_level(cls, v):
-    #     if isinstance(v, str):
-    #         v = v.lower()
-    #     return v
-    
+
     @validator('stop_loss_percent')
     def validate_stop_loss(cls, v):
         if not 1 <= v <= 20:
             raise ValueError('Stop loss percentage must be between 1 and 20')
         return v
-    
+
     @validator('take_profit_percent')
     def validate_take_profit(cls, v):
         if not 5 <= v <= 50:
             raise ValueError('Take profit percentage must be between 5 and 50')
         return v
+
+    class Config:
+        extra = "allow"  # ✅ This allows any additional fields from front-end JSON
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = None
