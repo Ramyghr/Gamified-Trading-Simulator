@@ -1,0 +1,92 @@
+# Crisis Simulator: System Explanation
+
+This document provides a comprehensive explanation of the Crisis Simulator system, detailing its architecture, components, and the flow of a simulation from start to finish.
+
+## 1. High-Level Overview
+
+The Crisis Simulator is a sophisticated system designed to allow users to experience and trade through historical financial crises in a compressed, real-time environment. It simulates a specific historical period (e.g., the Great Depression, the 2008 Financial Crisis) over a much shorter real-world duration (e.g., 60 minutes). Users can join a simulation, receive a virtual cash balance, and place trades for assets that were relevant during that historical period. The system uses real historical price data to execute these trades, providing a realistic and educational trading experience. A live leaderboard tracks participant performance, fostering a competitive environment.
+
+## 2. Core Components
+
+The system is built around a set of distinct components, each with a specific responsibility:
+
+### `SimulationEngine`
+- **File:** `app/crisis_simulator/engine.py`
+- **Role:** This is the central orchestrator of the entire system. It manages the lifecycle of a simulation.
+- **Responsibilities:**
+    - **Creation:** Creates new simulation instances with a `PENDING` status.
+    - **Lifecycle Management:** Starts, pauses, resumes, and completes simulations.
+    - **Main Loop:** Runs a continuous background task (`_simulation_update_loop`) for active simulations. This loop is the heart of the system, responsible for updating time, processing orders, and refreshing participant data.
+    - **Coordination:** Uses the `TimeCompressor` to manage the simulation's clock and the `HistoricalOrderProcessor` to handle all trading activity.
+
+### `HistoricalDataLoader`
+- **File:** `app/crisis_simulator/data_loader.py`
+- **Role:** The data provider for the simulation.
+- **Responsibilities:**
+    - **Data Loading:** Reads historical market data (primarily daily closing prices) from CSV files stored in the `Simulation_data/` directory.
+    - **Caching:** Caches the loaded data in memory for fast access during a simulation.
+    - **Price Lookups:** Provides methods to get the price of a specific asset at a specific historical timestamp. It can interpolate prices between known data points to provide a continuous price flow.
+    - **Data Synthesis:** It can synthesize Open-High-Low-Close-Volume (OHLCV) data from the daily close prices to provide a more realistic (though not historically perfect) view of the market.
+
+### `TimeCompressor`
+- **File:** `app/crisis_simulator/time_compressor.py`
+- **Role:** The "master clock" of the simulation.
+- **Responsibilities:**
+    - **Phase-based Compression:** Divides each historical crisis into multiple phases (e.g., "Bubble Formation," "Crash," "Recovery"). Each phase has its own `compression_ratio`, mapping a certain number of historical days to a set number of real-world seconds. This allows the simulation to speed through slower periods and slow down during more volatile ones.
+    - **Time Translation:** Its primary job is to convert the current real-world time into the corresponding historical date and time. For example, five minutes into a real-world simulation might correspond to a specific date in 1929.
+
+### `HistoricalOrderProcessor`
+- **File:** `app/crisis_simulator/historical_order_processor.py`
+- **Role:** The trade execution engine.
+- **Responsibilities:**
+    - **Order Execution:** Executes `MARKET`, `LIMIT`, and `STOP` orders based on the historical prices provided by the `HistoricalDataLoader`.
+    - **Constraint Enforcement:** Applies crisis-specific trading rules, such as temporary bans on short-selling or different margin requirements that were in effect during that period.
+    - **Portfolio Management:** Updates a participant's cash, positions, and calculates realized and unrealized Profit & Loss (P&L) after each trade.
+    - **Valuation:** Calculates the current total value of a participant's portfolio (cash + assets) based on the latest historical prices.
+
+### Database Models
+- **File:** `app/models/crisis_simulator.py`
+- **Role:** Defines the database structure for all simulation data using SQLAlchemy.
+- **Key Models:**
+    - `CrisisSimulation`: The main record for a simulation instance.
+    - `SimulationParticipant`: A user's profile within a simulation, tracking their portfolio and performance.
+    - `SimulationOrder`: A record of every trade order placed by a participant.
+    - `SimulationPosition`: A participant's current holdings in a specific asset.
+    - `SimulationLeaderboard`: Stores the ranked performance of all participants.
+
+### API Schemas & Router
+- **Files:** `app/schemas/crisis_simulator.py`, `app/routers/crisis_simulator.py`
+- **Role:** The user-facing interface of the system.
+- **Responsibilities:**
+    - The `schemas` define the shape of the data for API requests and responses using Pydantic, ensuring data validation.
+    - The `router` exposes the FastAPI endpoints that allow users (and admins) to interact with the simulation (e.g., create/join simulations, place orders, get leaderboard/portfolio status).
+
+## 3. The Simulation Lifecycle: A Step-by-Step Flow
+
+1.  **Creation (Admin):** An administrator initiates a new simulation via an API call, selecting a `crisis_type` (e.g., `covid_crash`). The `SimulationEngine` creates a `CrisisSimulation` entry in the database with a `PENDING` status.
+
+2.  **Joining (User):** While the simulation is `PENDING`, users can see it in the UI and choose to join. When they join, a `SimulationParticipant` record is created for them, linked to the simulation, with a starting virtual cash balance (e.g., $100,000).
+
+3.  **Starting (Admin):** An admin starts the simulation. The `SimulationEngine`:
+    - Changes the simulation status to `ACTIVE`.
+    - Records the real-world start time.
+    - Launches the `_simulation_update_loop` as a background task.
+
+4.  **The Update Loop (The Heartbeat):** This loop runs every second while the simulation is `ACTIVE`. In each iteration, it performs the following critical tasks:
+    - **Update Time:** It asks the `TimeCompressor`: "Based on the current real time, what is the historical time?" The `TimeCompressor` calculates and returns the precise historical timestamp, which is then updated in the database.
+    - **Process Orders:** The engine fetches all `PENDING` orders. It passes each order to the `HistoricalOrderProcessor`, which checks if the market conditions at the current historical time trigger the order (e.g., has the price crossed the limit price?). If an order is executed, its status is changed to `FILLED`, and the participant's portfolio is updated.
+    - **Update Portfolios:** For every participant, the engine recalculates their total portfolio value. It gets the current historical price for each asset they hold and updates their `unrealized_pnl`.
+    - **Update Leaderboard:** Periodically (e.g., every 10 seconds), the engine recalculates the rankings based on total return percentage and updates the `SimulationLeaderboard` table.
+
+5.  **User Interaction (During the Simulation):**
+    - A user places a `MARKET` order to buy 'AAPL'.
+    - The API endpoint receives the request and creates a `SimulationOrder` in the database.
+    - If it's a `MARKET` order, it's executed immediately by the `HistoricalOrderProcessor` at the current historical price.
+    - If it's a `LIMIT` or `STOP` order, it remains `PENDING` until the `_simulation_update_loop` finds that its price condition has been met.
+    - The user can make API calls to see their updated cash, positions, and their rank on the leaderboard.
+
+6.  **Completion:** The `TimeCompressor` determines when the full historical period has been simulated. The `_simulation_update_loop` sees that the simulation is complete and calls the `_complete_simulation` function. This function:
+    - Sets the simulation status to `COMPLETED`.
+    - Automatically cancels any remaining `PENDING` orders.
+    - Performs one final update of the leaderboard to determine the final rankings.
+    - The simulation is now over and can be reviewed in the user's history.

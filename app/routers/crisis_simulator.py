@@ -353,11 +353,45 @@ async def place_order(
     
     return OrderResponse(**order.__dict__)
 
-
+@router.get("/dashboard/trading", response_model=dict)
+async def get_trading_dashboard(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get trading dashboard data
+    """
+    # Get active simulation
+    simulation = db.query(CrisisSimulation).filter(
+        CrisisSimulation.status.in_([SimulationStatus.ACTIVE, SimulationStatus.PENDING])
+    ).first()
+    
+    if not simulation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No simulation available"
+        )
+    
+    # Get participant
+    participant = db.query(SimulationParticipant).filter(
+        SimulationParticipant.simulation_id == simulation.id,
+        SimulationParticipant.user_id == current_user.id
+    ).first()
+    
+    # Get symbols for this crisis
+    data_loader = HistoricalDataLoader()
+    symbols = data_loader.get_available_assets(simulation.crisis_type.value)
+    
+    return {
+        "simulation": simulation.__dict__,
+        "participant": participant.__dict__ if participant else None,
+        "available_symbols": symbols[:10],  # First 10 symbols
+        "can_trade": participant is not None and simulation.status == SimulationStatus.ACTIVE
+    }
 @router.post("/positions/{position_id}/close", response_model=dict)
 async def close_position(
     position_id: int,
-    quantity: Optional[float] = Query(None, description="Quantity to close (default: entire position)"),
+    quantity: Optional[float] = None,  # Changed from Query(None)
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -1166,7 +1200,80 @@ async def get_simulation_participants(
     
     return [ParticipantResponse(**p.__dict__) for p in participants]
 
-
+@router.get("/positions", response_model=List[PositionResponse])
+async def get_my_positions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get current open positions with enhanced position type
+    """
+    simulation = db.query(CrisisSimulation).filter(
+        CrisisSimulation.status == SimulationStatus.ACTIVE
+    ).first()
+    
+    if not simulation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active simulation"
+        )
+    
+    participant = db.query(SimulationParticipant).filter(
+        SimulationParticipant.simulation_id == simulation.id,
+        SimulationParticipant.user_id == current_user.id,
+        SimulationParticipant.is_active == True
+    ).first()
+    
+    if not participant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not participating in active simulation"
+        )
+    
+    positions = db.query(SimulationPosition).filter(
+        SimulationPosition.participant_id == participant.id
+    ).all()
+    
+    # Get current prices for all positions
+    data_loader = HistoricalDataLoader()
+    response_positions = []
+    
+    for position in positions:
+        # Get current price
+        current_price = data_loader.get_price_at_time(
+            simulation.crisis_type.value,
+            position.symbol,
+            simulation.current_historical_time
+        )
+        
+        # Calculate market value
+        market_value = position.quantity * current_price if current_price else None
+        
+        # Determine position type
+        position_type = "LONG" if position.quantity > 0 else "SHORT"
+        
+        # Calculate unrealized P&L
+        if current_price:
+            if position.quantity > 0:  # Long
+                unrealized_pnl = (current_price - position.average_cost) * position.quantity
+            else:  # Short
+                unrealized_pnl = (position.average_cost - current_price) * abs(position.quantity)
+        else:
+            unrealized_pnl = 0.0
+        
+        # Create response with all fields
+        position_dict = position.__dict__.copy()
+        position_dict["position_type"] = position_type
+        position_dict["market_value"] = market_value
+        position_dict["current_price"] = current_price
+        position_dict["unrealized_pnl"] = unrealized_pnl
+        
+        # Remove SQLAlchemy internal attribute
+        position_dict.pop('_sa_instance_state', None)
+        
+        response_positions.append(PositionResponse(**position_dict))
+    
+    return response_positions
 # @router.get("/crisis-types", response_model=List[dict])
 # async def get_available_crisis_types(
 #     current_user: User = Depends(get_current_user)

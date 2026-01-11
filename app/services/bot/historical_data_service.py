@@ -21,70 +21,64 @@ class HistoricalDataService:
     Fetches historical price data from multiple sources with intelligent fallback
     Priority: Polygon -> Finnhub -> Alpha Vantage -> Twelve Data -> Yahoo Finance
     """
-    
     def __init__(self):
-        # API Keys - PLACEHOLDERS - YOU NEED TO FILL THESE
+        # API Keys
         self.alpha_vantage_key = os.getenv("ALPHA_VANTAGE_API_KEY", "V6KUJ6EQB9OCJ1CT")
         self.twelve_data_key = os.getenv("TWELVE_DATA_API_KEY", "7dd48638c9f54ffd9029af89de3213d6")
         self.polygon_key = os.getenv("POLYGON_API_KEY", "dHrLdODMLQqYtmf2Na7iDYN2nnDyPdXn")
         self.finnhub_key = os.getenv("FINNHUB_API_KEY", "d3lia21r01qq28enk8lgd3lia21r01qq28enk8m0")
         
-        # API priority configuration
+        # Data sources with CORRECTED priority for commodities
         self.data_sources = [
             {
-                "name": "Polygon.io",
-                "priority": 1,
-                "enabled": True if self.polygon_key != "dHrLdODMLQqYtmf2Na7iDYN2nnDyPdXn" else False,
-                "fetch_func": self._fetch_from_polygon,
-                "asset_classes": ["stock", "crypto", "forex", "commodity"],
-                "rate_limit": 5  # requests per minute
-            },
-            {
-                "name": "Finnhub",
-                "priority": 2,
-                "enabled": True if self.finnhub_key != "d3lia21r01qq28enk8lgd3lia21r01qq28enk8m0" else False,
-                "fetch_func": self._fetch_from_finnhub,
-                "asset_classes": ["stock", "crypto", "forex"],
-                "rate_limit": 60  # free tier limit
-            },
-            {
-                "name": "Alpha Vantage",
-                "priority": 3,
-                "enabled": True if self.alpha_vantage_key != "V6KUJ6EQB9OCJ1CT" else False,
-                "fetch_func": self._fetch_from_alpha_vantage,
-                "asset_classes": ["stock", "forex", "commodity", "crypto"],
-                "rate_limit": 5  # free tier limit
+                "name": "Yahoo Finance",
+                "priority": 1,  # Best for commodities like XAUUSD
+                "enabled": True,
+                "fetch_func": self._fetch_from_yahoo,
+                "asset_classes": ["stock", "forex", "commodity", "etf", "index"],
+                "rate_limit": 0
             },
             {
                 "name": "Twelve Data",
-                "priority": 4,
-                "enabled": True if self.twelve_data_key != "7dd48638c9f54ffd9029af89de3213d6" else False,
+                "priority": 2,
+                "enabled": bool(self.twelve_data_key and self.twelve_data_key != "7dd48638c9f54ffd9029af89de3213d6"),
                 "fetch_func": self._fetch_from_twelve_data,
                 "asset_classes": ["stock", "crypto", "forex", "commodity", "index"],
-                "rate_limit": 800  # free tier per day
+                "rate_limit": 800
             },
             {
-                "name": "Yahoo Finance",
+                "name": "Polygon.io",
+                "priority": 3,
+                "enabled": bool(self.polygon_key and self.polygon_key != "dHrLdODMLQqYtmf2Na7iDYN2nnDyPdXn"),
+                "fetch_func": self._fetch_from_polygon,
+                "asset_classes": ["stock", "crypto", "forex"],  # Limited commodity support
+                "rate_limit": 5
+            },
+            {
+                "name": "Alpha Vantage",
+                "priority": 4,
+                "enabled": bool(self.alpha_vantage_key and self.alpha_vantage_key != "V6KUJ6EQB9OCJ1CT"),
+                "fetch_func": self._fetch_from_alpha_vantage,
+                "asset_classes": ["stock", "forex", "commodity", "crypto"],
+                "rate_limit": 5
+            },
+            {
+                "name": "Finnhub",
                 "priority": 5,
-                "enabled": True,
-                "fetch_func": self._fetch_from_yahoo,
-                "asset_classes": ["stock", "crypto", "forex", "commodity", "etf"],
-                "rate_limit": 0  # unlimited
+                "enabled": bool(self.finnhub_key and self.finnhub_key != "d3lia21r01qq28enk8lgd3lia21r01qq28enk8m0"),
+                "fetch_func": self._fetch_from_finnhub,
+                "asset_classes": ["stock", "crypto", "forex"],
+                "rate_limit": 60
             }
         ]
         
-        # Sort by priority
         self.data_sources.sort(key=lambda x: x["priority"])
-        
-        # Cache and rate limiting
         self.cache = {}
-        self.rate_limits = {}
         self.request_times = {}
         
-        # Initialize rate limits
         for source in self.data_sources:
             self.request_times[source["name"]] = []
-    
+
     def get_available_sources(self) -> List[Dict]:
         """Get list of available data sources with their status"""
         available = []
@@ -107,71 +101,203 @@ class HistoricalDataService:
         asset_class: str = "stock"
     ) -> pd.DataFrame:
         """
-        Get historical OHLCV data from multiple sources with intelligent fallback
-        
-        Args:
-            symbol: Trading symbol (e.g., "AAPL", "BTCUSDT", "XAUUSD")
-            start_date: Start date
-            end_date: End date
-            interval: Data interval (1m, 5m, 15m, 30m, 1h, 4h, 1d)
-            asset_class: Asset class to help choose appropriate API
-        
-        Returns:
-            DataFrame with columns: timestamp, open, high, low, close, volume
+        Get historical OHLCV data with multiple fallback strategies
         """
         cache_key = f"{symbol}_{start_date.date()}_{end_date.date()}_{interval}_{asset_class}"
         
-        # Check cache
         if cache_key in self.cache:
             logger.info(f"✓ Cache hit for {symbol}")
             return self.cache[cache_key]
         
-        # Try enabled data sources in priority order
+        # Detect asset class
+        detected_class = self._detect_asset_class(symbol, asset_class)
+        logger.info(f"Processing {symbol} as {detected_class}")
+        
+        errors = []
+        
+        # Strategy 1: Try with original symbol
         for source in self.data_sources:
-            if not source["enabled"]:
-                continue
-                
-            # Check if source supports this asset class
-            if asset_class not in source["asset_classes"]:
-                logger.debug(f"Skipping {source['name']} - doesn't support {asset_class}")
-                continue
-            
-            # Check rate limit
-            if not self._check_rate_limit(source["name"], source["rate_limit"]):
-                logger.debug(f"Rate limit reached for {source['name']}, trying next source")
+            if not self._can_use_source(source, detected_class):
                 continue
             
             try:
-                logger.info(f"Attempting {source['name']} for {symbol} ({asset_class})...")
+                logger.info(f"→ Trying {source['name']} with original symbol {symbol}...")
+                data = await self._try_fetch(source, symbol, start_date, end_date, interval, detected_class)
                 
-                data = await source["fetch_func"](
-                    symbol=symbol,
-                    start_date=start_date,
-                    end_date=end_date,
-                    interval=interval,
-                    asset_class=asset_class
-                )
-                
-                # Record request time for rate limiting
-                self._record_request_time(source["name"])
-                
-                if not data.empty and len(data) > 10:  # Require minimum data points
-                    logger.info(f"✓ {source['name']} success: {len(data)} candles for {symbol}")
+                if not data.empty and len(data) >= 10:
+                    logger.info(f"✓ {source['name']} SUCCESS: {len(data)} candles")
                     self.cache[cache_key] = data
                     return data
-                elif not data.empty:
-                    logger.warning(f"✗ {source['name']} returned insufficient data ({len(data)} candles)")
-                else:
-                    logger.warning(f"✗ {source['name']} returned empty data for {symbol}")
                     
             except Exception as e:
-                logger.warning(f"✗ {source['name']} failed for {symbol}: {str(e)[:100]}")
-                continue
+                error_msg = f"{source['name']} (original): {str(e)[:150]}"
+                logger.warning(f"✗ {error_msg}")
+                errors.append(error_msg)
         
-        # All sources failed
-        error_msg = f"All data sources failed for {symbol}. Check API keys, symbol format, and date range."
-        logger.error(error_msg)
-        raise ValueError(error_msg)
+        # Strategy 2: Try with alternative symbols for commodities
+        if detected_class == "commodity":
+            alternative_symbols = self._get_alternative_symbols(symbol)
+            logger.info(f"Trying alternative symbols: {alternative_symbols}")
+            
+            for alt_symbol in alternative_symbols:
+                for source in self.data_sources:
+                    if not self._can_use_source(source, detected_class):
+                        continue
+                    
+                    try:
+                        logger.info(f"→ Trying {source['name']} with {alt_symbol}...")
+                        data = await self._try_fetch(source, alt_symbol, start_date, end_date, interval, detected_class)
+                        
+                        if not data.empty and len(data) >= 10:
+                            logger.info(f"✓ {source['name']} SUCCESS with {alt_symbol}: {len(data)} candles")
+                            self.cache[cache_key] = data
+                            return data
+                            
+                    except Exception as e:
+                        error_msg = f"{source['name']} ({alt_symbol}): {str(e)[:150]}"
+                        errors.append(error_msg)
+        
+        # Strategy 3: Try with relaxed date range (last 30 days)
+        logger.info("Trying with relaxed date range (last 30 days)...")
+        relaxed_end = datetime.now()
+        relaxed_start = relaxed_end - timedelta(days=30)
+        
+        for source in self.data_sources:
+            if not self._can_use_source(source, detected_class):
+                continue
+            
+            try:
+                logger.info(f"→ Trying {source['name']} with recent data...")
+                data = await self._try_fetch(source, symbol, relaxed_start, relaxed_end, interval, detected_class)
+                
+                if not data.empty and len(data) >= 10:
+                    logger.info(f"✓ {source['name']} SUCCESS with recent data: {len(data)} candles")
+                    # Filter to requested date range if possible
+                    filtered = data[
+                        (data['timestamp'] >= start_date) & 
+                        (data['timestamp'] <= end_date)
+                    ]
+                    if not filtered.empty and len(filtered) >= 10:
+                        self.cache[cache_key] = filtered
+                        return filtered
+                    else:
+                        logger.warning("Recent data doesn't cover requested range, returning all data")
+                        self.cache[cache_key] = data
+                        return data
+                        
+            except Exception as e:
+                error_msg = f"{source['name']} (recent): {str(e)[:150]}"
+                errors.append(error_msg)
+        
+        # All strategies failed
+        error_summary = "\n".join([f"  - {err}" for err in errors[:10]])  # Limit to 10 errors
+        
+        suggestions = self._get_suggestions(symbol, detected_class, interval)
+        
+        raise ValueError(
+            f"All strategies failed for {symbol} ({detected_class}):\n{error_summary}\n\n"
+            f"Suggestions:\n{suggestions}"
+        )
+    def _get_alternative_symbols(self, symbol: str) -> List[str]:
+        """Get alternative symbol formats to try"""
+        symbol_upper = symbol.upper()
+        alternatives = []
+        
+        # Gold alternatives
+        if symbol_upper in ['XAUUSD', 'XAU/USD', 'GOLD']:
+            alternatives = ['GC=F', 'XAU/USD', 'XAUUSD', 'GOLD']
+        
+        # Silver alternatives
+        elif symbol_upper in ['XAGUSD', 'XAG/USD', 'SILVER']:
+            alternatives = ['SI=F', 'XAG/USD', 'XAGUSD', 'SILVER']
+        
+        # Oil alternatives
+        elif symbol_upper in ['CL', 'OIL', 'CRUDEOIL']:
+            alternatives = ['CL=F', 'CL', 'CRUDEOIL']
+        
+        # Remove the original symbol and return unique alternatives
+        alternatives = [s for s in alternatives if s != symbol_upper]
+        return alternatives
+
+    def _get_suggestions(self, symbol: str, asset_class: str, interval: str) -> str:
+        """Generate helpful suggestions"""
+        suggestions = []
+        
+        suggestions.append("1. Try daily interval (1d) instead of hourly - more reliable")
+        suggestions.append("2. Check if yfinance is installed: pip install yfinance")
+        
+        if asset_class == "commodity":
+            suggestions.append("3. For gold, try symbols: GC=F, XAU/USD, or XAUUSD")
+            suggestions.append("4. Yahoo Finance futures may not be available in all regions")
+            suggestions.append("5. Consider using Twelve Data API (requires API key)")
+        
+        if not self.twelve_data_key or self.twelve_data_key == "7dd48638c9f54ffd9029af89de3213d6":
+            suggestions.append("6. Enable Twelve Data API: export TWELVE_DATA_API_KEY=your_key")
+        
+        suggestions.append(f"7. Try a more recent date range (e.g., last 30 days)")
+        suggestions.append(f"8. Run debug script: python -m app.scripts.debug_data_fetch")
+        
+        return "\n".join([f"  {s}" for s in suggestions])
+
+    def _can_use_source(self, source: dict, asset_class: str) -> bool:
+        """Check if source can be used"""
+        if not source["enabled"]:
+            return False
+        if asset_class not in source["asset_classes"]:
+            return False
+        if not self._check_rate_limit(source["name"], source["rate_limit"]):
+            return False
+        return True
+
+    async def _try_fetch(
+        self,
+        source: dict,
+        symbol: str,
+        start_date: datetime,
+        end_date: datetime,
+        interval: str,
+        asset_class: str
+    ) -> pd.DataFrame:
+        """Try to fetch data from a source"""
+        data = await source["fetch_func"](
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval,
+            asset_class=asset_class
+        )
+        self._record_request_time(source["name"])
+        return data
+
+    def _detect_asset_class(self, symbol: str, provided_class: str) -> str:
+        """Auto-detect asset class"""
+        symbol_upper = symbol.upper()
+        
+        # Commodity patterns
+        commodity_symbols = {
+            'XAUUSD', 'XAU/USD', 'GOLD', 'GC=F', 'GC',
+            'XAGUSD', 'XAG/USD', 'SILVER', 'SI=F', 'SI',
+            'CL', 'CL=F', 'OIL', 'CRUDEOIL',
+            'NG', 'NG=F', 'NATURALGAS',
+            'HG', 'HG=F', 'COPPER'
+        }
+        
+        if symbol_upper in commodity_symbols:
+            return "commodity"
+        
+        # Forex patterns
+        if '/' in symbol and len(symbol.replace('/', '')) == 6:
+            return "forex"
+        if len(symbol) == 6 and symbol.isalpha():
+            return "forex"
+        
+        # Crypto patterns
+        crypto_pairs = {'USDT', 'BUSD', 'USDC', 'BTC', 'ETH'}
+        if any(pair in symbol_upper for pair in crypto_pairs):
+            return "crypto"
+        
+        return provided_class
+
     
     # ============ POLYGON.IO ============
     async def _fetch_from_polygon(
@@ -478,19 +604,18 @@ class HistoricalDataService:
         interval: str,
         asset_class: str = "stock"
     ) -> pd.DataFrame:
-        """
-        Fetch from Twelve Data
-        Best for: All asset types, global coverage
-        """
+        """Twelve Data API"""
         try:
-            url = "https://api.twelvedata.com/time_series"
+            td_symbol = self._convert_to_twelve_data_symbol(symbol, asset_class)
+            logger.info(f"  Twelve Data: {symbol} → {td_symbol}")
             
+            url = "https://api.twelvedata.com/time_series"
             params = {
-                "symbol": symbol,
+                "symbol": td_symbol,
                 "interval": interval,
                 "apikey": self.twelve_data_key,
-                "start_date": start_date.strftime("%Y-%m-%d %H:%M:%S"),
-                "end_date": end_date.strftime("%Y-%m-%d %H:%M:%S"),
+                "start_date": start_date.strftime("%Y-%m-%d"),
+                "end_date": end_date.strftime("%Y-%m-%d"),
                 "outputsize": 5000,
                 "format": "JSON"
             }
@@ -499,33 +624,43 @@ class HistoricalDataService:
                 response = await client.get(url, params=params)
                 data = response.json()
             
-            # Check for errors
             if "status" in data and data["status"] == "error":
-                logger.error(f"Twelve Data error: {data.get('message', 'Unknown error')}")
+                logger.error(f"  Twelve Data error: {data.get('message')}")
                 return pd.DataFrame()
             
             if "values" not in data or not data["values"]:
-                logger.warning("Twelve Data returned no values")
+                logger.warning("  No values returned")
                 return pd.DataFrame()
             
             df = pd.DataFrame(data["values"])
             df = df.rename(columns={'datetime': 'timestamp'})
-            
             df['timestamp'] = pd.to_datetime(df['timestamp'])
+            
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
             
-            df = df.dropna()
-            df = df.sort_values('timestamp')
+            df = df.dropna().sort_values('timestamp')
             
-            logger.info(f"✓ Twelve Data: {len(df)} candles for {symbol}")
+            logger.info(f"  Twelve Data: {len(df)} candles")
             return df
             
         except Exception as e:
-            logger.error(f"Twelve Data error for {symbol}: {str(e)}")
+            logger.error(f"  Twelve Data error: {str(e)}")
             return pd.DataFrame()
-    
+
+    def _convert_to_twelve_data_symbol(self, symbol: str, asset_class: str) -> str:
+        """Convert to Twelve Data format"""
+        symbol_upper = symbol.upper()
+        
+        if asset_class == "commodity":
+            commodity_map = {
+                'XAUUSD': 'XAU/USD', 'GOLD': 'XAU/USD', 'GC=F': 'XAU/USD',
+                'XAGUSD': 'XAG/USD', 'SILVER': 'XAG/USD', 'SI=F': 'XAG/USD'
+            }
+            return commodity_map.get(symbol_upper, symbol)
+        
+        return symbol
     # ============ YAHOO FINANCE ============
     async def _fetch_from_yahoo(
         self,
@@ -535,160 +670,177 @@ class HistoricalDataService:
         interval: str,
         asset_class: str = "stock"
     ) -> pd.DataFrame:
-        """
-        Fetch from Yahoo Finance using yfinance
-        Supports: stocks, ETFs, crypto, commodities, forex
-        """
+        """Yahoo Finance with enhanced error handling"""
         try:
             import yfinance as yf
             
-            # Map interval to Yahoo format
             interval_map = {
                 "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
                 "1h": "1h", "4h": "1h", "1d": "1d"
             }
             yf_interval = interval_map.get(interval, "1h")
             
-            # Convert symbol to Yahoo format
+            # Convert symbol
             yahoo_symbol = self._convert_to_yahoo_symbol(symbol, asset_class)
+            logger.info(f"  Yahoo: {symbol} → {yahoo_symbol} ({yf_interval})")
             
-            logger.info(f"Fetching {yahoo_symbol} from Yahoo Finance ({yf_interval})")
-            
-            # Fetch data
+            # Create ticker
             ticker = yf.Ticker(yahoo_symbol)
             
-            # Calculate period based on interval
-            if yf_interval in ["1m", "5m", "15m", "30m"]:
-                # Intraday - max 7 days for free Yahoo data
-                period = "7d"
-            elif yf_interval == "1h":
-                period = "60d"
-            else:
-                period = "max"
+            # Calculate appropriate period
+            days_diff = (end_date - start_date).days
             
-            df = ticker.history(
-                start=start_date,
-                end=end_date,
-                interval=yf_interval,
-                period=period,
-                auto_adjust=True,
-                actions=False
-            )
+            if yf_interval in ["1m", "5m"]:
+                period = "7d"
+            elif yf_interval in ["15m", "30m"]:
+                period = "60d"
+            elif yf_interval == "1h":
+                period = "730d"
+            else:
+                if days_diff <= 30:
+                    period = "1mo"
+                elif days_diff <= 90:
+                    period = "3mo"
+                elif days_diff <= 180:
+                    period = "6mo"
+                elif days_diff <= 365:
+                    period = "1y"
+                else:
+                    period = "max"
+            
+            logger.info(f"  Requesting period={period}, interval={yf_interval}")
+            
+            # Try with date range first
+            try:
+                df = ticker.history(
+                    start=start_date,
+                    end=end_date,
+                    interval=yf_interval,
+                    auto_adjust=True,
+                    actions=False
+                )
+            except Exception as e:
+                logger.warning(f"  Date range failed: {e}, trying period...")
+                # Fallback to period
+                df = ticker.history(
+                    period=period,
+                    interval=yf_interval,
+                    auto_adjust=True,
+                    actions=False
+                )
             
             if df.empty:
-                logger.warning(f"Yahoo returned empty data for {yahoo_symbol}")
+                logger.warning(f"  Empty result for {yahoo_symbol}")
                 return pd.DataFrame()
             
-            # Normalize to standard format
+            logger.info(f"  Raw data: {len(df)} rows")
+            
+            # Normalize columns
             df = df.reset_index()
             
-            # Handle different column names
+            # Handle timestamp column
             if 'Date' in df.columns:
                 df = df.rename(columns={'Date': 'timestamp'})
             elif 'Datetime' in df.columns:
                 df = df.rename(columns={'Datetime': 'timestamp'})
             
+            # Rename OHLCV columns
             df = df.rename(columns={
-                'Open': 'open',
-                'High': 'high',
-                'Low': 'low',
-                'Close': 'close',
-                'Volume': 'volume'
+                'Open': 'open', 'High': 'high', 'Low': 'low',
+                'Close': 'close', 'Volume': 'volume'
             })
             
-            # Ensure we have required columns
-            required_cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-            if all(col in df.columns for col in required_cols):
-                df = df[required_cols]
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                
-                # Convert to numeric
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-                
-                # Remove any rows with NaN
-                df = df.dropna()
-                df = df.sort_values('timestamp')
-                
-                logger.info(f"✓ Yahoo Finance: {len(df)} candles for {symbol}")
-                return df
+            # Check required columns
+            required = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            missing = [col for col in required if col not in df.columns]
             
-            return pd.DataFrame()
+            if missing:
+                logger.error(f"  Missing columns: {missing}")
+                logger.error(f"  Available columns: {list(df.columns)}")
+                return pd.DataFrame()
+            
+            # Select and clean
+            df = df[required]
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Remove NaN
+            before_clean = len(df)
+            df = df.dropna()
+            after_clean = len(df)
+            
+            if before_clean != after_clean:
+                logger.info(f"  Cleaned: {before_clean} → {after_clean} rows")
+            
+            df = df.sort_values('timestamp')
+            
+            logger.info(f"  Final: {len(df)} candles from {df['timestamp'].min()} to {df['timestamp'].max()}")
+            
+            return df
             
         except ImportError:
-            logger.error("yfinance not installed! Install: pip install yfinance")
+            logger.error("❌ yfinance not installed! Run: pip install yfinance")
             return pd.DataFrame()
         except Exception as e:
-            logger.error(f"Yahoo Finance error for {symbol}: {str(e)}")
+            logger.error(f"  Yahoo error: {str(e)}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return pd.DataFrame()
-    
+
     def _convert_to_yahoo_symbol(self, symbol: str, asset_class: str) -> str:
-        """Convert trading symbol to Yahoo Finance format"""
-        # Crypto conversions
-        if asset_class == "crypto":
-            if "USDT" in symbol:
-                return symbol.replace("USDT", "-USD")
-            elif symbol == "BTC":
-                return "BTC-USD"
-            elif symbol == "ETH":
-                return "ETH-USD"
-            else:
-                return f"{symbol}-USD"
+        """Convert to Yahoo format"""
+        symbol_upper = symbol.upper()
         
-        # Forex conversions
-        if asset_class == "forex":
-            forex_pairs = {
-                "EURUSD": "EURUSD=X",
-                "GBPUSD": "GBPUSD=X",
-                "USDJPY": "USDJPY=X",
-                "AUDUSD": "AUDUSD=X",
-                "USDCAD": "USDCAD=X",
-                "USDCHF": "USDCHF=X",
-                "NZDUSD": "NZDUSD=X",
-            }
-            return forex_pairs.get(symbol, f"{symbol}=X")
-        
-        # Commodities
         if asset_class == "commodity":
             commodity_map = {
-                "XAUUSD": "GC=F",  # Gold futures
-                "XAGUSD": "SI=F",  # Silver futures
-                "CL": "CL=F",      # Crude oil
-                "NG": "NG=F",      # Natural gas
-                "HG": "HG=F",      # Copper
+                'XAUUSD': 'GC=F', 'XAU/USD': 'GC=F', 'GOLD': 'GC=F',
+                'XAGUSD': 'SI=F', 'XAG/USD': 'SI=F', 'SILVER': 'SI=F',
+                'CL': 'CL=F', 'OIL': 'CL=F', 'CRUDEOIL': 'CL=F',
+                'NG': 'NG=F', 'NATURALGAS': 'NG=F',
+                'HG': 'HG=F', 'COPPER': 'HG=F'
             }
-            return commodity_map.get(symbol, symbol)
+            if symbol_upper in commodity_map:
+                return commodity_map[symbol_upper]
+            if '=F' in symbol:
+                return symbol
         
-        # Stocks/ETFs - return as-is
+        if asset_class == "forex":
+            if '/' in symbol:
+                symbol_upper = symbol_upper.replace('/', '')
+            return f"{symbol_upper}=X"
+        
+        if asset_class == "crypto":
+            crypto_map = {
+                'BTCUSDT': 'BTC-USD', 'ETHUSDT': 'ETH-USD',
+                'BTC': 'BTC-USD', 'ETH': 'ETH-USD'
+            }
+            return crypto_map.get(symbol_upper, f"{symbol_upper}-USD")
+        
         return symbol
-    
     # ============ RATE LIMITING ============
     def _check_rate_limit(self, source_name: str, rate_limit: int) -> bool:
-        """Check if we can make another request based on rate limit"""
-        if rate_limit == 0:  # Unlimited
-            return True
-        
-        if source_name not in self.request_times:
+        """Check rate limiting"""
+        if rate_limit == 0:
             return True
         
         current_time = time.time()
-        window_start = current_time - 60  # 1 minute window
+        window_start = current_time - 60
         
-        # Count requests in the last minute
-        recent_requests = [t for t in self.request_times[source_name] if t > window_start]
-        
-        return len(recent_requests) < rate_limit
-    
+        recent = [t for t in self.request_times.get(source_name, []) if t > window_start]
+        return len(recent) < rate_limit
+
     def _record_request_time(self, source_name: str):
-        """Record a request time for rate limiting"""
+        """Record request time"""
         if source_name not in self.request_times:
             self.request_times[source_name] = []
         
         self.request_times[source_name].append(time.time())
         
-        # Keep only last 100 timestamps
         if len(self.request_times[source_name]) > 100:
             self.request_times[source_name] = self.request_times[source_name][-50:]
+
     
     # ============ UTILITY METHODS ============
     def _filter_by_date_range(
@@ -709,20 +861,19 @@ class HistoricalDataService:
         return filtered
     
     def clear_cache(self):
-        """Clear the cache"""
+        """Clear cache"""
         self.cache.clear()
-        logger.info("Historical data cache cleared")
+        logger.info("Cache cleared")
     
     def get_source_status(self) -> Dict:
-        """Get status of all data sources"""
+        """Get status of all sources"""
         status = {}
         for source in self.data_sources:
             status[source["name"]] = {
                 "enabled": source["enabled"],
                 "priority": source["priority"],
                 "asset_classes": source["asset_classes"],
-                "rate_limit": source["rate_limit"],
-                "recent_requests": len(self.request_times.get(source["name"], []))
+                "rate_limit": source["rate_limit"]
             }
         return status
 

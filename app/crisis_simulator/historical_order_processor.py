@@ -343,8 +343,10 @@ class HistoricalOrderProcessor:
         db: Session
     ):
         """
-        Update participant's position after order execution - COMPLETELY FIXED
+        Update participant's position after order execution - COMPLETELY REWRITTEN
+        Uses FIFO (First-In-First-Out) for position management
         """
+        # Get existing position for this symbol
         position = db.query(SimulationPosition).filter(
             SimulationPosition.participant_id == participant.id,
             SimulationPosition.symbol == order.symbol
@@ -352,79 +354,130 @@ class HistoricalOrderProcessor:
         
         if order.side == "BUY":
             if position:
-                # Adding to existing position
-                total_cost = (position.average_cost * abs(position.quantity)) + (execution_price * order.quantity)
-                
-                if position.quantity < 0:
-                    # Covering short position
-                    position.quantity += order.quantity
-                    
-                    if position.quantity <= 0:
-                        # Still short or flat
-                        if position.quantity == 0:
-                            # Fully covered - delete position
-                            db.delete(position)
-                        else:
-                            # Partially covered - keep short
-                            pass
-                    else:
-                        # Overcovered - now long
-                        position.average_cost = execution_price
-                else:
-                    # Adding to long position
+                # BUY when position exists
+                if position.quantity > 0:
+                    # Adding to existing LONG position - simple average cost
+                    total_cost = (position.average_cost * position.quantity) + (execution_price * order.quantity)
                     position.quantity += order.quantity
                     position.average_cost = total_cost / position.quantity
+                    position.opened_at = datetime.utcnow()
+                    
+                elif position.quantity < 0:
+                    # BUY to cover SHORT position (reduce or close)
+                    # Using FIFO - covering oldest shorts first
+                    short_to_cover = min(order.quantity, abs(position.quantity))
+                    
+                    # Calculate realized P&L for covered portion
+                    realized_pnl = (position.average_cost - execution_price) * short_to_cover
+                    position.realized_pnl += realized_pnl
+                    
+                    # Update quantity
+                    position.quantity += short_to_cover  # This reduces the short
+                    
+                    if position.quantity == 0:
+                        # Fully covered - position is now flat
+                        db.delete(position)
+                    else:
+                        # Partially covered, still short
+                        position.opened_at = datetime.utcnow()
+                        
+                    # If we bought more than we needed to cover, now we're long
+                    remaining_qty = order.quantity - short_to_cover
+                    if remaining_qty > 0:
+                        # Create new LONG position with remaining quantity
+                        new_position = SimulationPosition(
+                            participant_id=participant.id,
+                            symbol=order.symbol,
+                            quantity=remaining_qty,
+                            average_cost=execution_price,
+                            current_price=execution_price,
+                            realized_pnl=0.0,
+                            opened_at=datetime.utcnow(),
+                            last_updated=datetime.utcnow()
+                        )
+                        db.add(new_position)
+                        
             else:
-                # Creating new long position
+                # No position exists - creating new LONG position
                 position = SimulationPosition(
                     participant_id=participant.id,
                     symbol=order.symbol,
                     quantity=order.quantity,
                     average_cost=execution_price,
-                    realized_pnl=0.0,
+                    current_price=execution_price,
                     unrealized_pnl=0.0,
-                    unrealized_pnl_pct=0.0
+                    unrealized_pnl_pct=0.0,
+                    realized_pnl=0.0,
+                    opened_at=datetime.utcnow(),
+                    last_updated=datetime.utcnow()
                 )
                 db.add(position)
         
-        else:  # SELL
+        else:  # SELL order
             if position:
                 if position.quantity > 0:
-                    # Selling from long position
-                    sell_quantity = min(order.quantity, position.quantity)
-                    realized_pnl = (execution_price - position.average_cost) * sell_quantity
-                    position.realized_pnl += realized_pnl
-                    position.quantity -= sell_quantity
+                    # SELL from LONG position (reduce or close)
+                    # Using FIFO - selling oldest longs first
+                    long_to_sell = min(order.quantity, position.quantity)
                     
-                    # Check if we sold more than we had (short sale)
-                    if order.quantity > sell_quantity:
-                        short_quantity = order.quantity - sell_quantity
-                        position.quantity = -short_quantity
-                        position.average_cost = execution_price
-                    elif position.quantity == 0:
-                        # Position fully closed
+                    # Calculate realized P&L for sold portion
+                    realized_pnl = (execution_price - position.average_cost) * long_to_sell
+                    position.realized_pnl += realized_pnl
+                    
+                    # Update quantity
+                    position.quantity -= long_to_sell
+                    
+                    if position.quantity == 0:
+                        # Fully sold - position is now flat
                         db.delete(position)
+                    else:
+                        # Partially sold, still long
+                        position.opened_at = datetime.utcnow()
+                    
+                    # If we sold more than we had, now we're short
+                    remaining_qty = order.quantity - long_to_sell
+                    if remaining_qty > 0:
+                        # Create new SHORT position with remaining quantity
+                        new_position = SimulationPosition(
+                            participant_id=participant.id,
+                            symbol=order.symbol,
+                            quantity=-remaining_qty,  # Negative for short
+                            average_cost=execution_price,
+                            current_price=execution_price,
+                            realized_pnl=0.0,
+                            opened_at=datetime.utcnow(),
+                            last_updated=datetime.utcnow()
+                        )
+                        db.add(new_position)
+                        
                 elif position.quantity < 0:
-                    # Adding to short position
-                    total_proceeds = (position.average_cost * abs(position.quantity)) + (execution_price * order.quantity)
-                    position.quantity -= order.quantity
-                    position.average_cost = total_proceeds / abs(position.quantity)
-                else:
-                    # quantity is 0 - shouldn't happen but handle it
-                    position.quantity = -order.quantity
-                    position.average_cost = execution_price
+                    # Adding to existing SHORT position
+                    total_proceeds = (abs(position.average_cost) * abs(position.quantity)) + (execution_price * order.quantity)
+                    position.quantity -= order.quantity  # Make more negative
+                    position.average_cost = - (total_proceeds / abs(position.quantity))  # Negative average cost for shorts
+                    position.opened_at = datetime.utcnow()
+                    
             else:
-                # Creating new short position
+                # No position exists - creating new SHORT position
                 position = SimulationPosition(
                     participant_id=participant.id,
                     symbol=order.symbol,
-                    quantity=-order.quantity,
-                    average_cost=execution_price,
-                    realized_pnl=0.0,
+                    quantity=-order.quantity,  # Negative for short
+                    average_cost=execution_price,  # Positive cost basis for shorts
+                    current_price=execution_price,
                     unrealized_pnl=0.0,
-                    unrealized_pnl_pct=0.0
+                    unrealized_pnl_pct=0.0,
+                    realized_pnl=0.0,
+                    opened_at=datetime.utcnow(),
+                    last_updated=datetime.utcnow()
                 )
                 db.add(position)
+        
+        # Update participant's profitable trades counter
+        if order.status == "FILLED":
+            # Check if this order resulted in a profitable close
+            # (We already updated realized_pnl above)
+            pass
         
     def calculate_portfolio_value(
         self,

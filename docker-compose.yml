@@ -89,6 +89,7 @@ services:
     networks:
       - trading-network
 
+
 volumes:
   bot-logs:
   pgdata:

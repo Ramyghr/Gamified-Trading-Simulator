@@ -20,6 +20,7 @@ from app.models.portfolio import (
     AssetType,
     PositionSide,
 )
+from app.models.chat import ChatConversation,ChatMessage,MessageRole
 from app.models.watchlist import Watchlist, WatchlistItem
 from app.models.user_lesson_progress import UserLessonProgress
 from app.models.user_xp import UserXP, XPTransaction
@@ -70,6 +71,9 @@ __all__ = [
     "EmailVerificationToken",
     "ResetPasswordToken",
     "BlacklistedToken",
+    "ChatConversation",
+    "ChatMessage",
+    "MessageRole",
     # Portfolio & Trading
     "Portfolio",
     "Holding",

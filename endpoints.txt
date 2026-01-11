@@ -1,0 +1,139 @@
+### **admin.py** (`/admin`)
+-   `POST /simulations`: Create a new crisis simulation.
+-   `POST /simulations/{simulation_id}/start`: Start a pending simulation.
+-   `POST /simulations/{simulation_id}/stop`: Stop a running simulation.
+-   `POST /simulations/{simulation_id}/pause`: Pause an active simulation.
+-   `POST /simulations/{simulation_id}/resume`: Resume a paused simulation.
+-   `DELETE /simulations/{simulation_id}`: Delete a simulation.
+-   `GET /simulations/history`: Get the history of all simulations.
+-   `GET /simulations/{simulation_id}/stats`: Get detailed statistics for a simulation.
+-   `GET /users`: Get a list of all users.
+-   `PATCH /users/{user_email}/role`: Update a user's role.
+-   `GET /stats`: Get system-wide statistics.
+-   `GET /test`: A test endpoint for admin access.
+-   `POST /`: Create a new lesson.
+-   `PUT /{lesson_id}`: Update an existing lesson.
+-   `DELETE /{lesson_id}`: Delete a lesson.
+-   `POST /recalculate-levels`: Recalculate XP levels for all users.
+
+### **api_key.py** (`/key`)
+-   `GET /alpha-vantage`: Get the Alpha Vantage API key.
+-   `GET /rapid-api`: Get the RapidAPI key.
+
+### **auth.py**
+-   `POST /register`: Register a new user.
+-   `GET /verify-email`: Verify a user's email address with a token.
+-   `POST /login`: Authenticate a user and return a JWT.
+-   `POST /check-jwt-expiry`: Check if a JWT is still valid.
+-   `POST /logout`: Log out the current user.
+-   `POST /logout-all-devices`: Log out the user from all devices.
+
+### **bot.py** (`/bots`)
+-   `POST /`: Create a new trading bot.
+-   `GET /`: Get a list of the user's trading bots.
+-   `GET /{bot_id}`: Get details for a specific bot.
+-   `PUT /{bot_id}`: Update a bot's configuration.
+-   `DELETE /{bot_id}`: Delete a bot.
+-   `POST /{bot_id}/start`: Start a trading bot.
+-   `POST /{bot_id}/pause`: Pause a trading bot.
+-   `POST /{bot_id}/stop`: Stop a trading bot.
+-   `POST /{bot_id}/execute`: Manually trigger a bot's execution cycle.
+-   `GET /{bot_id}/performance`: Get performance metrics for a bot.
+-   `GET /{bot_id}/trades`: Get a history of a bot's trades.
+-   `GET /{bot_id}/logs`: Get execution logs for a bot.
+-   `POST /{bot_id}/backtest`: Run a backtest simulation for a bot.
+-   `GET /{bot_id}/backtests`: Get the history of backtests for a bot.
+-   `GET /templates/strategies`: Get available trading strategy templates.
+
+### **candles.py** (`/api/v1/candles`)
+-   `GET /{symbol}`: Get historical candlestick data for a symbol.
+-   `GET /{symbol}/latest`: Get the most recent candlestick data for a symbol.
+
+### **chat.py** (`/api/chat`)
+-   `POST /message`: Send a message to the financial coach AI.
+-   `GET /conversations`: Get all of the user's chat conversations.
+-   `GET /conversations/{conversation_id}`: Get a specific conversation and its messages.
+-   `POST /conversations`: Manually create a new conversation.
+-   `DELETE /conversations/{conversation_id}`: Delete a conversation.
+-   `PATCH /conversations/{conversation_id}/title`: Update the title of a conversation.
+
+### **crisis_simulator.py** (`/api/crisis-simulator`)
+-   `GET /simulations/active`: Get the currently active or pending simulation.
+-   `POST /simulations/{simulation_id}/join`: Join a simulation.
+-   `DELETE /simulations/{simulation_id}/leave`: Leave a simulation.
+-   `POST /orders`: Place a trading order within a simulation.
+-   `GET /leaderboard`: Get the simulation leaderboard.
+-   `GET /my-stats`: Get the current user's statistics within the simulation.
+-   `GET /positions`: Get the current user's open positions in the simulation.
+
+### **lesson.py** (`/lessons`)
+-   `GET /xp/status`: Get the user's current XP and level status.
+-   `GET /xp/transactions`: Get the user's XP transaction history.
+-   `GET /dashboard/stats`: Get statistics for the learning dashboard.
+-   `GET /leaderboard`: Get the XP leaderboard.
+-   `GET /`: Get a list of all lessons with the user's progress.
+-   `GET /{lesson_id}`: Get details for a specific lesson.
+-   `POST /{lesson_id}/complete`: Mark a lesson as complete.
+-   `POST /{lesson_id}/submit-quiz`: Submit answers for a quiz.
+
+### **leverage.py** (`/leverage`)
+-   `POST /positions/open`: Open a new leveraged position.
+-   `POST /positions/close`: Close an existing leveraged position.
+-   `GET /positions`: Get a list of the user's leveraged positions.
+-   `GET /margin/info`: Get the user's current margin information.
+-   `POST /calculator`: Calculate margin requirements and risk for a potential trade.
+-   `GET /liquidations/history`: Get the user's liquidation history.
+
+### **market_data.py** (`/api/market`)
+-   `GET /health`: Check the health of the market data providers.
+-   `POST /quotes`: Get quotes for multiple symbols at once.
+-   `GET /quote/{symbol}`: Get a single quote for a symbol.
+-   `GET /status/{market}`: Get the status (open/closed) of a specific market.
+
+### **news.py** (`/news`)
+-   `GET /`: Get a paginated list of news articles.
+-   `POST /{article_id}/like`: Like or unlike a news article.
+-   `POST /comment`: Add a comment to a news article.
+-   `POST /refresh`: Trigger a refresh of the news articles.
+
+### **orders.py** (`/orders`)
+-   `POST /`: Create a new trading order.
+-   `GET /`: Get a list of the user's orders.
+-   `GET /pending`: Get a list of the user's pending orders.
+-   `GET /{order_id}`: Get details for a specific order.
+-   `DELETE /{order_id}`: Cancel an order.
+-   `GET /{order_id}/transactions`: Get transactions for a specific order.
+-   `POST /validate`: Validate an order without placing it.
+
+### **portfolio.py** (`/portfolio`)
+-   `GET /overview`: Get a comprehensive overview of the user's portfolio.
+-   `GET /stats`: Get detailed statistics for the portfolio.
+-   `GET /holdings`: Get the user's current holdings (spot positions).
+-   `GET /positions/detailed`: Get all spot and leveraged positions.
+-   `GET /history`: Get the portfolio's value history.
+-   `GET /rank`: Get the user's portfolio rank compared to others.
+-   `POST /refresh`: Refresh the portfolio's valuation with the latest market prices.
+
+### **user.py** (`/user`)
+-   `GET /settingsInfo`: Get the user's settings information.
+-   `GET /fullName`: Get the user's full name.
+-   `PATCH /update`: Update the user's profile information.
+-   `PATCH /security-settings`: Update security-related settings.
+-   `PATCH /notification-settings`: Update notification preferences.
+-   `POST /reset-password-request`: Request a password reset link.
+-   `POST /reset-password`: Reset the password using a token.
+-   `GET /me`: Get the current user's profile information.
+
+### **watchlist.py** (`/api/v1/watchlist`)
+-   `POST /`: Create a new watchlist.
+-   `GET /`: Get all of the user's watchlists.
+-   `GET /{watchlist_id}`: Get a specific watchlist.
+-   `DELETE /{watchlist_id}`: Delete a watchlist.
+-   `POST /{watchlist_id}/items`: Add an item to a watchlist.
+-   `DELETE /{watchlist_id}/items/{symbol}`: Remove an item from a watchlist.
+-   `GET /symbols/popular`: Get a list of popular symbols.
+-   `GET /symbols/search`: Search for symbols.
+
+### **websocket.py**
+-   `WEBSOCKET /ws/market`: WebSocket for receiving real-time market data.
+-   `WEBSOCKET /market`: WebSocket for Redis-based market data updates.
