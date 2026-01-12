@@ -10,11 +10,7 @@ from app.config import settings
 
 # Services
 from app.services.market_data.cache_service import CacheService
-from app.services.websocket.market_stream import market_stream_service
 from app.services.news_services import NewsService  
-from app.services.order_processor import start_order_processor, stop_order_processor
-from app.services.liquidation_engine import start_liquidation_engine, stop_liquidation_engine
-from app.services.order_processor import start_order_processor, stop_order_processor
 
 # Models
 from app.models import user as user_model, portfolio, token, stock
@@ -34,17 +30,23 @@ from app.routers import (
     orders,
     candles,
     websocket,
-    orders,
     watchlist,
-    websocket,
-    lesson
+    lesson,
+    sentiment,
+    news_sentimental,
+    trends
 )
 
-
+# FinBERT imports
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # Initialize cache & logger
 cache_service = CacheService()
 logger = logging.getLogger(__name__)
+
+# FinBERT global variables
+tokenizer = None
+model = None
 
 from app.models import base
 base.Base.metadata.create_all(bind=engine)
@@ -61,6 +63,7 @@ async def lifespan(app: FastAPI):
     # Import background services
     from app.services.order_processor import start_order_processor, stop_order_processor
     from app.services.market_data_refresher import start_market_refresher, stop_market_refresher
+    from app.services.liquidation_engine import start_liquidation_engine, stop_liquidation_engine
     
     # Start background tasks
     logger.info("Starting background services...")
@@ -68,8 +71,46 @@ async def lifespan(app: FastAPI):
     # Create tasks
     order_processor_task = asyncio.create_task(start_order_processor())
     market_refresher_task = asyncio.create_task(start_market_refresher())
+    liquidation_task = asyncio.create_task(start_liquidation_engine())
     
     logger.info("✅ Background services started")
+    
+    # Load FinBERT model
+    global tokenizer, model
+    logger.info("🔄 Loading FinBERT model...")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained("ProsusAI/finbert")
+        model = AutoModelForSequenceClassification.from_pretrained("ProsusAI/finbert")
+        logger.info("✅ FinBERT loaded successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to load FinBERT model: {e}")
+    
+    # News scheduler
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    
+    scheduler = AsyncIOScheduler()
+    
+    async def scheduled_news_refresh():
+        db = SessionLocal()
+        try:
+            news_service = NewsService(db)
+            await news_service.refresh_news_articles()
+            logger.info("✅ News refreshed successfully")
+        except Exception as e:
+            logger.error(f"❌ Scheduled news refresh failed: {e}")
+        finally:
+            db.close()
+
+    scheduler.add_job(
+        scheduled_news_refresh,
+        "interval",
+        minutes=30,
+        id="news_refresh",
+        replace_existing=True,
+    )
+
+    scheduler.start()
+    logger.info("📰 News scheduler started — refreshing every 30 minutes.")
     
     yield
     
@@ -77,10 +118,14 @@ async def lifespan(app: FastAPI):
     logger.info("Stopping background services...")
     await stop_order_processor()
     await stop_market_refresher()
+    await stop_liquidation_engine()
     
     # Cancel tasks
     order_processor_task.cancel()
     market_refresher_task.cancel()
+    liquidation_task.cancel()
+    
+    scheduler.shutdown()
     
     logger.info("✅ Background services stopped")
 
@@ -130,44 +175,9 @@ app.include_router(candles.router)
 app.include_router(watchlist.router)
 app.include_router(websocket.router)
 app.include_router(orders.router)
-# app.include_router(api_key.router)
-
-
-
-# -------------------------------
-# Scheduler (News Refresh)
-# -------------------------------
-@app.on_event("startup")
-async def startup_event():
-    """Start periodic background tasks like the news refresh scheduler."""
-    from apscheduler.schedulers.background import BackgroundScheduler
-
-    scheduler = BackgroundScheduler()
-    asyncio.create_task(start_binance_streams())
-    asyncio.create_task(start_order_processor())    
-    asyncio.create_task(start_liquidation_engine())
-    logger.info("✅ All background workers started")
-    async def scheduled_news_refresh():
-        db = SessionLocal()
-        try:
-            news_service = NewsService(db)
-            await news_service.refresh_news_articles()
-            logger.info("✅ News refreshed successfully")
-        except Exception as e:
-            logger.error(f"❌ Scheduled news refresh failed: {e}")
-        finally:
-            db.close()
-
-    scheduler.add_job(
-        scheduled_news_refresh,
-        "interval",
-        minutes=30,
-        id="news_refresh",
-        replace_existing=True,
-    )
-
-    scheduler.start()
-    logger.info("News scheduler started — refreshing every 30 minutes.")
+app.include_router(sentiment.router, prefix="/api/v1/sentiment", tags=["Sentiment Analysis"])
+app.include_router(news_sentimental.router, prefix="/api/v1/news", tags=["News"])
+app.include_router(trends.router, prefix="/api/v1/trends", tags=["Market Trends"])
 
 
 # -------------------------------
@@ -191,12 +201,12 @@ async def health_check():
         },
     }
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    from app.services.liquidation_engine import stop_liquidation_engine
-    from app.services.order_processor import stop_order_processor
+# @app.on_event("shutdown")
+# async def shutdown_event():
+#     from app.services.liquidation_engine import stop_liquidation_engine
+#     from app.services.order_processor import stop_order_processor
     
-    await stop_order_processor()
-    await stop_liquidation_engine()
+#     await stop_order_processor()
+#     await stop_liquidation_engine()
     
-    logger.info("✅ All background workers stopped")
+#     logger.info("✅ All background workers stopped")
